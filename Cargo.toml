@@ -5,18 +5,16 @@ edition = "2024"
 rust-version = "1.88"
 
 [dependencies]
-axum = "0.8"
 blake3 = "1"
-bytes = "1"
-futures-util = "0.3"
-headers = "0.4"
 libc = "0.2"
 shlex = "2"
 tempfile = "3"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "blocking", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "fs"] }
+
+[dev-dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
 
 [profile.release]
 lto = "thin"

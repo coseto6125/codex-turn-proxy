@@ -1,4 +1,5 @@
 use std::{
+    env,
     fs::{self, File, OpenOptions},
     io::{self, BufRead, BufReader, Write},
     os::{
@@ -29,11 +30,12 @@ pub fn valid_id(id: &str) -> bool {
             .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
+/// Keep originals in user-owned state storage, independent of temporary-directory cleanup.
 pub fn default_root() -> PathBuf {
-    // SAFETY: geteuid has no preconditions and does not mutate process state.
-    PathBuf::from(format!("/tmp/codex-tool-results-{}", unsafe {
-        libc::geteuid()
-    }))
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default()
+        .join(".local/state/codex-turn-proxy/tool-results")
 }
 
 impl Store {
@@ -46,7 +48,11 @@ impl Store {
         if !root.is_absolute() || ttl.is_zero() || max_bytes == 0 || max_entries == 0 {
             return Err(io::Error::other("invalid output store configuration"));
         }
-        match fs::DirBuilder::new().mode(0o700).create(&root) {
+        match fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&root)
+        {
             Ok(()) => (),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => (),
             Err(error) => return Err(error),
@@ -108,7 +114,7 @@ impl Store {
         Ok(file)
     }
 
-    /// Serializes capture, reads, and cleanup across host processes and the container sweeper.
+    /// Serializes capture, reads, and cleanup across local capture, read, and cleanup processes.
     pub fn purge_expired(&self, now: SystemTime) -> io::Result<usize> {
         let _lock = self.lock()?;
         self.prune(now, 0, 0)

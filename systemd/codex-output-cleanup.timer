@@ -1,0 +1,10 @@
+[Unit]
+Description=Clean expired Codex tool output files every 30 seconds
+
+[Timer]
+OnStartupSec=30s
+OnUnitActiveSec=30s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

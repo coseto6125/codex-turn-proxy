@@ -1,0 +1,8 @@
+[Unit]
+Description=Clean expired Codex tool output files
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/lib/codex-turn-proxy/codex-turn-proxy cleanup
+NoNewPrivileges=true
+UMask=0077
