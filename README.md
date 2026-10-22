@@ -26,7 +26,7 @@ Preview 已包含全部內容，或完整卡片不比原文短時，直接回傳
 
 既有 hook 仍執行同一路徑的 `codex-turn-proxy hook`。它先串接既有 RTK／etoon，再包裝 Bash。
 因此保存的是既有 transformer 處理後、原本會交給模型的完整輸出。
-Capture 直接寫本機 `/tmp`，不需要 localhost 連線或 MCP。
+Capture 直接寫本機目錄，不需要 localhost 連線或 MCP。
 
 卡片範例：
 
@@ -34,7 +34,7 @@ Capture 直接寫本機 `/tmp`，不需要 localhost 連線或 MCP。
 <persisted-output>
 ID: <64-character ID>
 Bash exit: 1 | 18000 bytes
-Full output saved to: /tmp/codex-tool-results-1000/<ID>.txt
+Full output saved to: /home/<user>/.local/state/codex-turn-proxy/tool-results/<ID>.txt
 Read when needed: '/absolute/path/codex-turn-proxy' read <ID> 1 2000
 Preview (first 2000 characters at most):
 ...
@@ -56,7 +56,7 @@ Codex 的工具輸出 token 上限仍然適用；必要時指定較少行數。
 
 | 設定 | 預設 | 意義 |
 |---|---:|---|
-| `OUTPUT_STORE_DIR` | `/tmp/codex-tool-results-<effective UID>` | 本機原文目錄 |
+| `OUTPUT_STORE_DIR` | `$HOME/.local/state/codex-turn-proxy/tool-results` | 本機原文目錄 |
 | `MIN_OUTPUT_BYTES` | 4096 | Host Bash 落盤門檻 |
 | `STORE_IDLE_SECONDS` | 900 | 保存或 CLI 讀取後 15 分鐘過期 |
 | `MAX_STORE_BYTES` | 268435456 | 磁碟原文容量上限，256 MiB |
@@ -92,14 +92,15 @@ cargo build --release --locked
 cp .env.example .env
 # 將 openssl rand -hex 32 的結果填入 .env 的 PROXY_TOKEN。
 # 以下範例假設本機 UID/GID 都是 1000。
-install -d -m 700 /tmp/codex-tool-results-1000
+install -d -m 700 ~/.local/state/codex-turn-proxy ~/.local/state/codex-turn-proxy/tool-results
 docker compose up -d --build
 curl --fail http://127.0.0.1:8787/healthz
 ```
 
 在 `.env` 設定 `PROXY_TOKEN` 與 `UPSTREAM_BASE_URL`。
-UID／GID 不為 1000 時，設定 `LOCAL_UID`、`LOCAL_GID` 和 `OUTPUT_STORE_DIR`。
-Compose 不會自動建立 host 目錄，以免 root 建立錯誤權限。
+UID／GID 不為 1000 時，設定 `LOCAL_UID`、`LOCAL_GID`。
+原文目錄不放 `/tmp`。開機清理 `/tmp` 後，Docker Desktop 會以 root 重建不存在的 bind 來源。
+Proxy 會拒絕這個目錄，並在 `restart: unless-stopped` 下反覆重啟。
 Host CLI 與 Docker 的清理期限、容量設定必須一致。
 
 Host helper 會讀執行檔旁的 `client.json`：
@@ -168,7 +169,7 @@ Proxy 移除本機 token 與 hop-by-hop headers，轉送 Authorization，保留 
 不記錄憑證、請求原文或模型回應。
 
 新版 Docker 不保留舊版 RAM Store。舊卡片不會自動轉存，缺失的舊 ID 必須重跑原工具。
-新檔案使用 host bind mount，Docker 重啟不會刪除它們；TTL、容量淘汰與系統 `/tmp` 清理仍適用。
+新檔案使用 host bind mount，Docker 重啟不會刪除它們；TTL 與容量淘汰仍適用。
 
 此機制避免自己重寫歷史前綴，不保證服務端一定命中 prompt cache。
 讀回全文會增加正常 input token，Codex 自己的 compaction 也可能改變前綴。

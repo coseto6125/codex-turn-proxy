@@ -14,7 +14,7 @@ services:
       STORE_IDLE_SECONDS: ${STORE_IDLE_SECONDS:-900}
     volumes:
       - type: bind
-        source: ${OUTPUT_STORE_DIR:-/tmp/codex-tool-results-1000}
+        source: ${OUTPUT_STORE_DIR:-${HOME}/.local/state/codex-turn-proxy/tool-results}
         target: /tool-results
         bind:
           create_host_path: false

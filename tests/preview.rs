@@ -295,3 +295,56 @@ fn test_capture_offline_returns_preview_and_persists_original() {
     assert_eq!(files.len(), 1);
     assert_eq!(fs::read_to_string(&files[0]).unwrap(), raw);
 }
+
+#[test]
+fn test_cli_default_store_under_home_state_creates_private_directory() {
+    let home = tempfile::tempdir().unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_codex-turn-proxy"))
+        .args(["capture", "s", "default", "printf 'x%.0s' {1..5000}"])
+        .env_remove("OUTPUT_STORE_DIR")
+        .env_remove("MAX_STORE_BYTES")
+        .env_remove("MAX_STORE_ENTRIES")
+        .env_remove("STORE_IDLE_SECONDS")
+        .env_remove("BASH_ENV")
+        .env("HOME", home.path())
+        .env("MIN_OUTPUT_BYTES", "1")
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    assert!(String::from_utf8_lossy(&result.stdout).starts_with("<persisted-output>"));
+    let root = home
+        .path()
+        .join(".local/state/codex-turn-proxy/tool-results");
+    assert_eq!(
+        fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    let originals = fs::read_dir(&root)
+        .unwrap()
+        .filter(|entry| entry.as_ref().unwrap().path().extension() == Some("txt".as_ref()))
+        .count();
+    assert_eq!(originals, 1);
+}
+
+#[test]
+fn test_cli_default_store_without_home_preserves_output() {
+    let result = Command::new(env!("CARGO_BIN_EXE_codex-turn-proxy"))
+        .args(["capture", "s", "nohome", "printf 'y%.0s' {1..5000}; exit 3"])
+        .env_remove("OUTPUT_STORE_DIR")
+        .env_remove("MAX_STORE_BYTES")
+        .env_remove("MAX_STORE_ENTRIES")
+        .env_remove("STORE_IDLE_SECONDS")
+        .env_remove("BASH_ENV")
+        .env_remove("HOME")
+        .env("MIN_OUTPUT_BYTES", "1")
+        .output()
+        .unwrap();
+    assert_eq!(result.status.code(), Some(3));
+    assert_eq!(result.stdout, "y".repeat(5000).as_bytes());
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("persistence failed"), "{stderr}");
+    assert!(
+        stderr.contains("invalid output store configuration"),
+        "{stderr}"
+    );
+}
