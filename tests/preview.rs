@@ -1,4 +1,5 @@
 use codex_turn_proxy::{cli, store::Store};
+use serde_json::json;
 use std::{fs, process::Command};
 use std::{
     os::unix::fs::{PermissionsExt, symlink},
@@ -278,8 +279,6 @@ fn test_capture_offline_returns_preview_and_persists_original() {
             &format!("cat '{}'", input.display()),
         ])
         .env("OUTPUT_STORE_DIR", root.path().join("store"))
-        .env("PROXY_URL", "http://127.0.0.1:1")
-        .env("PROXY_TOKEN", "offline-unused-token-at-least-32-chars")
         .output()
         .unwrap();
     assert!(result.status.success());
@@ -346,5 +345,96 @@ fn test_cli_default_store_without_home_preserves_output() {
     assert!(
         stderr.contains("invalid output store configuration"),
         "{stderr}"
+    );
+}
+
+#[test]
+fn test_cli_no_command_shows_local_help_without_server_configuration() {
+    let output = Command::new(env!("CARGO_BIN_EXE_codex-turn-proxy"))
+        .env_remove("PROXY_TOKEN")
+        .env_remove("UPSTREAM_BASE_URL")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(help.contains("capture"));
+    assert!(help.contains("cleanup"));
+    assert!(!help.contains("serve"));
+}
+
+#[test]
+fn test_cli_retired_server_commands_fail_with_migration_message() {
+    for command in ["serve", "healthcheck"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_codex-turn-proxy"))
+            .arg(command)
+            .env_remove("PROXY_TOKEN")
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("Use the local hook"));
+    }
+}
+
+#[test]
+fn test_chained_hook_preserves_previous_transform_and_deny() {
+    let event = json!({"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"thread-a","tool_use_id":"a", "tool_input":{"command":"original"}});
+    let previous = json!({"hookSpecificOutput":{"permissionDecision":"allow","additionalContext":"existing context","updatedInput":{"command":"printf transformed"}}});
+    let argv = vec![
+        "/bin/sh".into(),
+        "-c".into(),
+        format!(
+            "cat >/dev/null; printf %s {}",
+            cli::quote(&previous.to_string())
+        ),
+    ];
+    let result =
+        cli::chained_hook(event.clone(), std::path::Path::new("/bin/echo"), &argv).unwrap();
+    assert_eq!(
+        result["hookSpecificOutput"]["additionalContext"],
+        "existing context"
+    );
+    assert!(
+        result["hookSpecificOutput"]["updatedInput"]["command"]
+            .as_str()
+            .unwrap()
+            .contains("printf transformed")
+    );
+    let deny = json!({"hookSpecificOutput":{"permissionDecision":"deny"}});
+    let argv = vec![
+        "/bin/sh".into(),
+        "-c".into(),
+        format!(
+            "cat >/dev/null; printf %s {}",
+            cli::quote(&deny.to_string())
+        ),
+    ];
+    assert_eq!(
+        cli::chained_hook(event, std::path::Path::new("/bin/echo"), &argv).unwrap(),
+        deny
+    );
+}
+#[test]
+fn test_hook_wrapper_preserves_input_and_shell_quoting() {
+    let command = "printf '%s' 'a b'";
+    let event = json!({"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"thread-a","tool_use_id":"a",
+        "tool_input":{"command":command,"cwd":"/tmp","timeout":1000}});
+    let output = cli::hook(event.clone(), std::path::Path::new("/bin/echo")).unwrap();
+    let input = &output["hookSpecificOutput"]["updatedInput"];
+    assert_eq!(input["cwd"], "/tmp");
+    assert_eq!(input["timeout"], 1000);
+    assert_eq!(output["hookSpecificOutput"]["permissionDecision"], "allow");
+    let actual = Command::new("bash")
+        .args(["-c", input["command"].as_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(actual.stdout).unwrap().trim_end(),
+        format!("capture thread-a a {command}")
+    );
+    let mut again = event;
+    again["tool_input"] = input.clone();
+    assert_eq!(
+        cli::hook(again, std::path::Path::new("/bin/echo")).unwrap(),
+        json!({})
     );
 }

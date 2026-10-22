@@ -1,6 +1,6 @@
 //! Opt-in integration with the installed Codex CLI and a local deterministic Responses server.
 use axum::{Router, body::Bytes, http::HeaderMap, routing::post};
-use codex_turn_proxy::{Config, Proxy, cli};
+use codex_turn_proxy::cli;
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -8,7 +8,6 @@ use std::{
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
-const TOKEN: &str = "offline-codex-proxy-token-32-characters";
 
 fn sse_event(kind: &str, value: Value) -> String {
     format!("event: {kind}\ndata: {value}\n\n")
@@ -108,11 +107,6 @@ async fn test_codex_native_hook_previews_first_then_reads_original_as_new_result
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let upstream = format!("http://{}/v1", listener.local_addr().unwrap());
     let mock_task = tokio::spawn(async move { axum::serve(listener, mock).await.unwrap() });
-    let proxy = Proxy::new(Config::new(upstream, TOKEN.into())).unwrap();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}", listener.local_addr().unwrap());
-    let proxy_task =
-        tokio::spawn(async move { axum::serve(listener, proxy.router()).await.unwrap() });
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("codex");
     fs::create_dir(&home).unwrap();
@@ -132,14 +126,12 @@ code_mode_only = false
 hooks = true
 [model_providers.offline]
 name = "offline"
-base_url = "{url}/v1"
+base_url = "{upstream}"
 env_key = "OFFLINE_TEST_KEY"
 wire_api = "responses"
 supports_websockets = false
 request_max_retries = 0
 stream_max_retries = 0
-[model_providers.offline.env_http_headers]
-x-proxy-token = "PROXY_TOKEN"
 [shell_environment_policy]
 inherit = "all"
 "#
@@ -158,8 +150,6 @@ inherit = "all"
         .current_dir(temp.path())
         .env("CODEX_HOME", &home)
         .env("OFFLINE_TEST_KEY", "offline-not-a-real-key")
-        .env("PROXY_TOKEN", TOKEN)
-        .env("PROXY_URL", &url)
         .env("OUTPUT_STORE_DIR", temp.path().join("store"))
         .stdin(Stdio::null())
         .stdout(fs::File::create(temp.path().join("stdout")).unwrap())
@@ -253,6 +243,5 @@ inherit = "all"
     eprintln!(
         "native Codex verified: preview first; explicit CLI read appends original; prior input prefix unchanged"
     );
-    proxy_task.abort();
     mock_task.abort();
 }

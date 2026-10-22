@@ -30,8 +30,7 @@ pub fn valid_id(id: &str) -> bool {
             .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
-/// Lives outside /tmp: boot-time /tmp cleanup removes it, and Docker Desktop then recreates a
-/// missing bind source as root, which this store rejects.
+/// Keep originals in user-owned state storage, independent of temporary-directory cleanup.
 pub fn default_root() -> PathBuf {
     env::var_os("HOME")
         .map(PathBuf::from)
@@ -115,7 +114,7 @@ impl Store {
         Ok(file)
     }
 
-    /// Serializes capture, reads, and cleanup across host processes and the container sweeper.
+    /// Serializes capture, reads, and cleanup across local capture, read, and cleanup processes.
     pub fn purge_expired(&self, now: SystemTime) -> io::Result<usize> {
         let _lock = self.lock()?;
         self.prune(now, 0, 0)
